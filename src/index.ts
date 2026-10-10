@@ -36,11 +36,14 @@ export interface RoundInputs {
 }
 
 export interface RoundingOptions {
-  /**
-   * Truncate the price per share to this many decimal places (e.g. 4 →
-   * $1.2345). Truncation never prices the round above the agreed valuation.
-   */
+  /** Round the price per share to this many decimal places (e.g. 4 → $1.2345). */
   pricePerShareDecimals?: number;
+  /**
+   * "nearest" (default — as in the YC SAFE User Guide examples, e.g.
+   * $1.111498 → $1.1115) or "down" (truncate, so the round is never priced
+   * above the agreed valuation).
+   */
+  pricePerShareRounding?: "nearest" | "down";
   /**
    * Issue whole shares: the pool top-up is rounded UP (the target is a
    * minimum) and investor shares are rounded DOWN (never more than the
@@ -119,6 +122,8 @@ export function pricedRound(inputs: RoundInputs): RoundResult {
     decimals === undefined || (Number.isInteger(decimals) && decimals >= 0 && decimals <= 12),
     `rounding.pricePerShareDecimals must be an integer in 0–12, got ${decimals}`,
   );
+  const mode = inputs.rounding?.pricePerShareRounding;
+  check(mode === undefined || mode === "nearest" || mode === "down", `rounding.pricePerShareRounding must be "nearest" or "down"`);
 
   // FD′(P) = (S + P) × (1 + I/V)   since investorShares = I(S+P)/V
   const k = 1 + investment / preMoney;
@@ -136,8 +141,9 @@ export function pricedRound(inputs: RoundInputs): RoundResult {
   let pricePerShare = preMoney / (S + poolTopUp);
   if (decimals !== undefined) {
     const scale = 10 ** decimals;
-    pricePerShare = floorTol(pricePerShare * scale) / scale;
-    check(pricePerShare > 0, `price per share truncates to 0 at ${decimals} decimals`);
+    const x = pricePerShare * scale;
+    pricePerShare = (inputs.rounding?.pricePerShareRounding === "down" ? floorTol(x) : Math.round(x + Math.abs(x) * 1e-12)) / scale;
+    check(pricePerShare > 0, `price per share rounds to 0 at ${decimals} decimals`);
   }
   let investorShares = investment / pricePerShare;
   if (whole) investorShares = floorTol(investorShares);

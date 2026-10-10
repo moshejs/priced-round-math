@@ -30,7 +30,7 @@ r.effectivePreMoney;  // preMoney minus the value handed to the new pool
 ## API
 
 - **`pricedRound({ preMoney, investment, preRoundFullyDiluted, existingUnallocatedPool?, targetPoolPostClose?, rounding? })`** — full solve. An existing unallocated pool reduces the top-up; if it already exceeds the target, `poolTopUp` is 0. Unsolvable targets (t × postMoney/preMoney ≥ 1) throw with an explanation. `targetPoolPostClose` is the *unallocated* pool as a fraction of post-close fully diluted shares.
-- **`rounding`** (opt-in): `{ pricePerShareDecimals?: number, wholeShares?: boolean }`. `pricePerShareDecimals` truncates the PPS (4 → $1.2345); `wholeShares` rounds the pool top-up up (target is a minimum) and investor shares down. `cashInvested` reports what the whole shares actually cost. With rounding on, the identities below hold only approximately (investor % is at most a share away from investment/post-money). Term sheets differ on rounding; check yours.
+- **`rounding`** (opt-in): `{ pricePerShareDecimals?: number, pricePerShareRounding?: "nearest" | "down", wholeShares?: boolean }`. `pricePerShareDecimals` rounds the PPS (4 → $1.2345), to nearest by default as in the YC SAFE User Guide examples, or `"down"` to truncate; `wholeShares` rounds the pool top-up up (target is a minimum) and investor shares down. `cashInvested` reports what the whole shares actually cost. With rounding on, the identities below hold only approximately (investor % is at most a share away from investment/post-money). Term sheets differ on rounding; check yours.
 - **`simplePricedRound(preMoney, investment, preRoundFD)`** — no pool top-up.
 - **`diluteHolders(holders, round, preRoundFD)`** — per-holder before/after ownership and dilution.
 

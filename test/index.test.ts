@@ -167,9 +167,13 @@ describe("opt-in rounding", () => {
     expect(r.investorShares).toBe(2_000_000);
   });
 
-  it("pricePerShareDecimals truncates the PPS", () => {
-    const r = pricedRound({ ...base, rounding: { pricePerShareDecimals: 4, wholeShares: true } });
-    expect(r.pricePerShare).toBe(0.8749); // 8M / 9,142,858 = 0.874999…
+  it("pricePerShareDecimals rounds the PPS to nearest by default, or down", () => {
+    // 8M / 9,142,858 = 0.874999…
+    const near = pricedRound({ ...base, rounding: { pricePerShareDecimals: 4, wholeShares: true } });
+    expect(near.pricePerShare).toBe(0.875);
+    expect(near.investorShares).toBe(Math.floor(2_000_000 / 0.875));
+    const r = pricedRound({ ...base, rounding: { pricePerShareDecimals: 4, pricePerShareRounding: "down", wholeShares: true } });
+    expect(r.pricePerShare).toBe(0.8749);
     expect(r.investorShares).toBe(Math.floor(2_000_000 / 0.8749));
     expect(() => pricedRound({ ...base, rounding: { pricePerShareDecimals: 1.5 } })).toThrow(RangeError);
   });
