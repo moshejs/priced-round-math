@@ -28,6 +28,28 @@ export interface RoundInputs {
    * (e.g. 0.1 for a "10% post-close pool"). Omit for no pool top-up.
    */
   targetPoolPostClose?: number;
+  /**
+   * Opt-in rounding to what is actually issued. Without it every figure is
+   * exact (fractional shares), and the identities hold exactly.
+   */
+  rounding?: RoundingOptions;
+}
+
+export interface RoundingOptions {
+  /** Round the price per share to this many decimal places (e.g. 4 → $1.2345). */
+  pricePerShareDecimals?: number;
+  /**
+   * "nearest" (default — as in the YC SAFE User Guide examples, e.g.
+   * $1.111498 → $1.1115) or "down" (truncate, so the round is never priced
+   * above the agreed valuation).
+   */
+  pricePerShareRounding?: "nearest" | "down";
+  /**
+   * Issue whole shares: the pool top-up is rounded UP (the target is a
+   * minimum) and investor shares are rounded DOWN (never more than the
+   * investment buys; see `cashInvested`).
+   */
+  wholeShares?: boolean;
 }
 
 export interface RoundResult {
@@ -37,6 +59,8 @@ export interface RoundResult {
   poolTopUp: number;
   /** Shares issued to the new investor(s). */
   investorShares: number;
+  /** investorShares × pricePerShare — equals `investment` unless rounding is on. */
+  cashInvested: number;
   /** Fully diluted shares after the close. */
   postRoundFullyDiluted: number;
   /** Investor ownership fraction post-close. */
@@ -56,6 +80,15 @@ export interface RoundResult {
 
 function check(cond: boolean, msg: string): void {
   if (!cond) throw new RangeError(msg);
+}
+
+// Floor/ceil that ignore floating-point noise just past an integer
+// (e.g. 2_000_000.0000000002 is 2_000_000, not 2_000_001 when rounding up).
+function floorTol(x: number): number {
+  return Math.floor(x + Math.abs(x) * 1e-12);
+}
+function ceilTol(x: number): number {
+  return Math.ceil(x - Math.abs(x) * 1e-12);
 }
 
 /**
@@ -83,6 +116,14 @@ export function pricedRound(inputs: RoundInputs): RoundResult {
   check(Number.isFinite(S) && S > 0, `preRoundFullyDiluted must be positive, got ${S}`);
   check(Number.isFinite(E) && E >= 0 && E <= S, `existingUnallocatedPool must be in [0, preRoundFullyDiluted]`);
   check(Number.isFinite(t) && t >= 0 && t < 1, `targetPoolPostClose must be in [0, 1), got ${t}`);
+  const decimals = inputs.rounding?.pricePerShareDecimals;
+  const whole = inputs.rounding?.wholeShares ?? false;
+  check(
+    decimals === undefined || (Number.isInteger(decimals) && decimals >= 0 && decimals <= 12),
+    `rounding.pricePerShareDecimals must be an integer in 0–12, got ${decimals}`,
+  );
+  const mode = inputs.rounding?.pricePerShareRounding;
+  check(mode === undefined || mode === "nearest" || mode === "down", `rounding.pricePerShareRounding must be "nearest" or "down"`);
 
   // FD′(P) = (S + P) × (1 + I/V)   since investorShares = I(S+P)/V
   const k = 1 + investment / preMoney;
@@ -95,9 +136,17 @@ export function pricedRound(inputs: RoundInputs): RoundResult {
   );
   let poolTopUp = (t * k * S - E) / denom;
   if (poolTopUp < 0) poolTopUp = 0; // existing pool already exceeds the target
+  if (whole) poolTopUp = ceilTol(poolTopUp);
 
-  const pricePerShare = preMoney / (S + poolTopUp);
-  const investorShares = investment / pricePerShare;
+  let pricePerShare = preMoney / (S + poolTopUp);
+  if (decimals !== undefined) {
+    const scale = 10 ** decimals;
+    const x = pricePerShare * scale;
+    pricePerShare = (inputs.rounding?.pricePerShareRounding === "down" ? floorTol(x) : Math.round(x + Math.abs(x) * 1e-12)) / scale;
+    check(pricePerShare > 0, `price per share rounds to 0 at ${decimals} decimals`);
+  }
+  let investorShares = investment / pricePerShare;
+  if (whole) investorShares = floorTol(investorShares);
   const postRoundFullyDiluted = S + poolTopUp + investorShares;
   const postMoney = preMoney + investment;
 
@@ -105,6 +154,7 @@ export function pricedRound(inputs: RoundInputs): RoundResult {
     pricePerShare,
     poolTopUp,
     investorShares,
+    cashInvested: investorShares * pricePerShare,
     postRoundFullyDiluted,
     investorOwnership: investorShares / postRoundFullyDiluted,
     poolOwnership: (poolTopUp + E) / postRoundFullyDiluted,
