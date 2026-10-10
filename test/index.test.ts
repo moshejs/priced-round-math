@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { diluteHolders, pricedRound, simplePricedRound } from "../src/index.js";
+import { CASES } from "./fixtures.js";
 
 describe("simple round (no pool shuffle)", () => {
   it("classic: $2M on $8M pre = 20% to the investor", () => {
@@ -121,5 +122,65 @@ describe("validation", () => {
     expect(() =>
       pricedRound({ preMoney: 1, investment: 1, preRoundFullyDiluted: 1, targetPoolPostClose: 1 }),
     ).toThrow(RangeError);
+  });
+});
+
+describe("published worked example", () => {
+  it("Venture Hacks: $2M on $8M pre with a 20% post-close pool → $6M effective pre-money", () => {
+    // https://venturehacks.com/option-pool-shuffle
+    const r = pricedRound({
+      preMoney: 8_000_000,
+      investment: 2_000_000,
+      preRoundFullyDiluted: 6_000_000,
+      targetPoolPostClose: 0.2,
+    });
+    expect(r.effectivePreMoney).toBeCloseTo(6_000_000, 6);
+    expect(r.poolOwnership).toBeCloseTo(0.2, 12);
+    expect(r.investorOwnership).toBeCloseTo(0.2, 12);
+    expect(r.existingOwnership).toBeCloseTo(0.6, 12);
+  });
+});
+
+describe("opt-in rounding", () => {
+  const base = { preMoney: 8_000_000, investment: 2_000_000, preRoundFullyDiluted: 8_000_000, targetPoolPostClose: 0.1 };
+
+  it("is off by default (exact, fractional shares)", () => {
+    const r = pricedRound(base);
+    expect(Number.isInteger(r.poolTopUp)).toBe(false);
+    expect(r.cashInvested).toBeCloseTo(2_000_000, 6);
+  });
+
+  it("wholeShares: pool rounds up, investor shares round down", () => {
+    const r = pricedRound({ ...base, rounding: { wholeShares: true } });
+    expect(r.poolTopUp).toBe(1_142_858); // exact 1,142,857.14
+    expect(Number.isInteger(r.investorShares)).toBe(true);
+    expect(r.poolOwnership).toBeGreaterThanOrEqual(0.1);
+    expect(r.cashInvested).toBeLessThanOrEqual(2_000_000);
+    expect(2_000_000 - r.cashInvested).toBeLessThan(r.pricePerShare);
+    expect(r.investorOwnership + r.poolOwnership + r.existingOwnership).toBeCloseTo(1, 12);
+  });
+
+  it("wholeShares does not round an exact integer up because of float noise", () => {
+    // exact top-up is 2,000,000 shares
+    const r = pricedRound({ preMoney: 8_000_000, investment: 2_000_000, preRoundFullyDiluted: 6_000_000, targetPoolPostClose: 0.2, rounding: { wholeShares: true } });
+    expect(r.poolTopUp).toBe(2_000_000);
+    expect(r.investorShares).toBe(2_000_000);
+  });
+
+  it("pricePerShareDecimals truncates the PPS", () => {
+    const r = pricedRound({ ...base, rounding: { pricePerShareDecimals: 4, wholeShares: true } });
+    expect(r.pricePerShare).toBe(0.8749); // 8M / 9,142,858 = 0.874999…
+    expect(r.investorShares).toBe(Math.floor(2_000_000 / 0.8749));
+    expect(() => pricedRound({ ...base, rounding: { pricePerShareDecimals: 1.5 } })).toThrow(RangeError);
+  });
+});
+
+describe("independent reference fixtures (exact rationals, bisection)", () => {
+  it.each(CASES.map((c, i) => [i, c] as const))("case %i", (_i, c) => {
+    const r = pricedRound(c.inputs);
+    for (const [k, want] of Object.entries(c.expected)) {
+      const got = r[k as keyof typeof c.expected];
+      expect(Math.abs(got - want) / Math.max(1, Math.abs(want))).toBeLessThan(1e-9);
+    }
   });
 });
